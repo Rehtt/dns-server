@@ -11,7 +11,7 @@ import (
 
 func main() {
 	// 监听 127.0.0.1:5345
-	addr := &net.UDPAddr{IP: net.ParseIP("127.0.0.1"), Port: 5345}
+	addr := &net.UDPAddr{IP: net.ParseIP("0.0.0.0"), Port: 5345}
 	conn, err := net.ListenUDP("udp", addr)
 	if err != nil {
 		panic(err)
@@ -32,11 +32,12 @@ func handleDNSRequest(conn *net.UDPConn, remoteAddr *net.UDPAddr, reqBytes []byt
 	// 解析请求数据
 	req := new(dns.Msg)
 	req.Unpack(reqBytes)
+	handle(req)
+	respBytes, _ := req.Pack()
+	conn.WriteToUDP(respBytes, remoteAddr)
+}
 
-	// 构造响应消息
-	resp := new(dns.Msg)
-	resp.SetReply(req)
-
+func handle(req *dns.Msg) {
 	// 遍历请求的问题
 	for _, q := range req.Question {
 		// 如果是A记录查询
@@ -44,7 +45,7 @@ func handleDNSRequest(conn *net.UDPConn, remoteAddr *net.UDPAddr, reqBytes []byt
 			ip := parseIP(q.Name)
 			// 如果域名匹配特定模式,直接返回对应IP
 			if ip != nil {
-				resp.Answer = append(resp.Answer, &dns.A{
+				req.Answer = append(req.Answer, &dns.A{
 					Hdr: dns.RR_Header{Name: q.Name, Rrtype: dns.TypeA, Class: dns.ClassINET, Ttl: 60},
 					A:   ip,
 				})
@@ -55,14 +56,10 @@ func handleDNSRequest(conn *net.UDPConn, remoteAddr *net.UDPAddr, reqBytes []byt
 		systemResp, err := dns.Exchange(req, "8.8.8.8:53")
 		if err == nil {
 			// 将上游DNS服务器的应答添加到响应中
-			resp.Answer = append(resp.Answer, systemResp.Answer...)
+			req.Answer = append(req.Answer, systemResp.Answer...)
 		}
 		fmt.Println(err)
 	}
-
-	// 将响应打包并发送
-	respBytes, _ := resp.Pack()
-	conn.WriteToUDP(respBytes, remoteAddr)
 }
 
 // 匹配类似：1.1.1.1.domain.com 的特殊域名
